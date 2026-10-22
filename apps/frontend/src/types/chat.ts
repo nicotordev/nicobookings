@@ -9,6 +9,7 @@ export interface ChatMessage {
 }
 
 export interface SendMessageResponse {
+  conversationId?: string;
   reply: string;
   humanHandoff: boolean;
   latencyMs: number;

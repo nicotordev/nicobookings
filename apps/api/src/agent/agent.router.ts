@@ -32,21 +32,73 @@ agentRouter.post("/chat", async (c) => {
   }
 
   // Load conversation + contractor + customer for context.
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    include: {
-      contractor: { select: { id: true, name: true, timezone: true } },
-      customer: { select: { id: true } },
-      messages: {
-        where: { role: { in: ["USER", "ASSISTANT"] } },
-        orderBy: { createdAt: "asc" },
-        select: { role: true, content: true },
-      },
-    },
-  });
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      conversationId,
+    );
+
+  let conversation = isUuid
+    ? await prisma.conversation.findUnique({
+        where: { id: conversationId },
+        include: {
+          contractor: { select: { id: true, name: true, timezone: true } },
+          customer: { select: { id: true } },
+          messages: {
+            where: { role: { in: ["USER", "ASSISTANT"] } },
+            orderBy: { createdAt: "asc" },
+            select: { role: true, content: true },
+          },
+        },
+      })
+    : null;
 
   if (!conversation) {
-    return c.json({ error: "Conversation not found." }, 404);
+    let contractor = await prisma.contractor.findFirst({
+      select: { id: true, name: true, timezone: true },
+    });
+
+    if (!contractor) {
+      contractor = await prisma.contractor.create({
+        data: {
+          name: "NicoBookings Studio",
+          slug: "nicobookings",
+          timezone: "America/Santiago",
+          services: {
+            create: [
+              { name: "Haircut & Styling", priceCents: 2500, durationMins: 45 },
+              { name: "Consultation", priceCents: 1500, durationMins: 30 },
+            ],
+          },
+        },
+        select: { id: true, name: true, timezone: true },
+      });
+    }
+
+    const customer = await prisma.customer.create({
+      data: {
+        contractorId: contractor.id,
+        name: "Guest Customer",
+        email: `guest_${Date.now()}@example.com`,
+      },
+      select: { id: true },
+    });
+
+    conversation = await prisma.conversation.create({
+      data: {
+        contractorId: contractor.id,
+        customerId: customer.id,
+        channel: "WEB",
+      },
+      include: {
+        contractor: { select: { id: true, name: true, timezone: true } },
+        customer: { select: { id: true } },
+        messages: {
+          where: { role: { in: ["USER", "ASSISTANT"] } },
+          orderBy: { createdAt: "asc" },
+          select: { role: true, content: true },
+        },
+      },
+    });
   }
 
   if (conversation.status === "CLOSED" || conversation.status === "HUMAN_HANDOFF") {
@@ -76,7 +128,7 @@ agentRouter.post("/chat", async (c) => {
   await prisma.$transaction([
     prisma.message.create({
       data: {
-        conversationId,
+        conversationId: conversation.id,
         role: "USER",
         content: message,
         channel: conversation.channel,
@@ -85,7 +137,7 @@ agentRouter.post("/chat", async (c) => {
     }),
     prisma.message.create({
       data: {
-        conversationId,
+        conversationId: conversation.id,
         role: "ASSISTANT",
         content: result.reply,
         channel: conversation.channel,
@@ -96,12 +148,13 @@ agentRouter.post("/chat", async (c) => {
       },
     }),
     prisma.conversation.update({
-      where: { id: conversationId },
+      where: { id: conversation.id },
       data: { lastMessageAt: new Date() },
     }),
   ]);
 
   return c.json({
+    conversationId: conversation.id,
     reply: result.reply,
     humanHandoff: result.humanHandoff,
     latencyMs: result.latencyMs,

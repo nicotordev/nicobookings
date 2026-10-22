@@ -55,6 +55,11 @@ export const App: React.FC = () => {
     try {
       const response = await sendChatMessage(conversationId, textToSend);
 
+      if (response.conversationId && response.conversationId !== conversationId) {
+        setConversationId(response.conversationId);
+        sessionStorage.setItem("nicobookings_conversation_id", response.conversationId);
+      }
+
       const assistantMessage: ChatMessage = {
         id: "msg_" + Math.random().toString(36).substring(2, 9),
         role: "assistant",
