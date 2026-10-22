@@ -1,0 +1,239 @@
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+enum ConversationStatus {
+  ACTIVE
+  WAITING_FOR_CUSTOMER
+  HUMAN_HANDOFF
+  RESOLVED
+  CLOSED
+}
+
+enum MessageRole {
+  SYSTEM
+  USER
+  ASSISTANT
+  TOOL
+}
+
+enum MessageChannel {
+  WEB
+  SMS
+}
+
+enum MessageDeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum HandoffStatus {
+  OPEN
+  ASSIGNED
+  RESOLVED
+}
+
+enum EvaluationStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model Contractor {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  timezone  String   @default("America/New_York")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  services     Service[]
+  customers    Customer[]
+  conversations Conversation[]
+  bookings     Booking[]
+  handoffs     HumanHandoff[]
+  testCases    AgentTestCase[]
+  evaluations  AgentEvaluation[]
+
+  @@index([createdAt])
+}
+
+model Customer {
+  id           String   @id @default(uuid()) @db.Uuid
+  contractorId String   @db.Uuid
+  name         String?
+  email        String?
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contractor   Contractor    @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  bookings     Booking[]
+
+  @@unique([contractorId, email])
+  @@unique([contractorId, phone])
+  @@index([contractorId, name])
+}
+
+model Service {
+  id           String   @id @default(uuid()) @db.Uuid
+  contractorId String   @db.Uuid
+  name         String
+  description  String?
+  priceCents   Int?
+  durationMins Int      @default(60)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contractor    Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+
+  @@unique([contractorId, name])
+  @@index([contractorId, isActive])
+}
+
+model Conversation {
+  id           String             @id @default(uuid()) @db.Uuid
+  contractorId String             @db.Uuid
+  customerId   String             @db.Uuid
+  status       ConversationStatus @default(ACTIVE)
+  channel      MessageChannel     @default(WEB)
+  summary      String?
+  handoffReason String?
+  lastMessageAt DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  customer   Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  bookings   Booking[]
+  handoffs   HumanHandoff[]
+
+  @@index([contractorId, status, updatedAt])
+  @@index([customerId, createdAt])
+}
+
+model Message {
+  id             String               @id @default(uuid()) @db.Uuid
+  conversationId String               @db.Uuid
+  role           MessageRole
+  content        String               @db.Text
+  channel        MessageChannel
+  deliveryStatus MessageDeliveryStatus?
+  externalId     String?
+  toolName       String?
+  metadata       Json?
+  latencyMs      Int?
+  costUsd        Decimal?             @db.Decimal(10, 6)
+  createdAt      DateTime             @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([channel, externalId])
+  @@index([conversationId, createdAt])
+}
+
+model Booking {
+  id             String        @id @default(uuid()) @db.Uuid
+  contractorId   String        @db.Uuid
+  customerId     String        @db.Uuid
+  serviceId      String        @db.Uuid
+  conversationId String?       @db.Uuid
+  status         BookingStatus @default(PENDING)
+  startsAt       DateTime
+  endsAt         DateTime
+  notes          String?
+  idempotencyKey String?       @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  contractor   Contractor   @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([contractorId, startsAt, status])
+  @@index([customerId, startsAt])
+  @@index([conversationId])
+}
+
+model HumanHandoff {
+  id             String        @id @default(uuid()) @db.Uuid
+  contractorId   String        @db.Uuid
+  conversationId String        @db.Uuid
+  status         HandoffStatus @default(OPEN)
+  reason         String
+  assignedTo     String?
+  notes          String?
+  createdAt      DateTime      @default(now())
+  resolvedAt     DateTime?
+
+  contractor   Contractor   @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([contractorId, status, createdAt])
+  @@index([conversationId, status])
+}
+
+model AgentTestCase {
+  id           String   @id @default(uuid()) @db.Uuid
+  contractorId String   @db.Uuid
+  name         String
+  input        String   @db.Text
+  expected     String   @db.Text
+  criteria     Json?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contractor  Contractor         @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  evaluations AgentEvaluation[]
+
+  @@index([contractorId, isActive])
+}
+
+model AgentEvaluation {
+  id             String           @id @default(uuid()) @db.Uuid
+  contractorId   String           @db.Uuid
+  testCaseId     String           @db.Uuid
+  status         EvaluationStatus @default(PENDING)
+  model          String
+  agentVersion   String?
+  actualOutput   String?          @db.Text
+  accuracyScore  Float?
+  instructionScore Float?
+  passed         Boolean?
+  latencyMs      Int?
+  costUsd        Decimal?         @db.Decimal(10, 6)
+  feedback       String?          @db.Text
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  completedAt    DateTime?
+
+  contractor Contractor  @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  testCase   AgentTestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@index([contractorId, createdAt])
+  @@index([testCaseId, createdAt])
+  @@index([contractorId, agentVersion, createdAt])
+}
