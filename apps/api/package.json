@@ -6,9 +6,9 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
-    "db:generate": "bun --env-file=.env ./node_modules/.bin/prisma generate",
-    "db:validate": "bun --env-file=.env ./node_modules/.bin/prisma validate",
-    "db:migrate": "bun --env-file=.env ./node_modules/.bin/prisma migrate dev",
+    "db:generate": "./node_modules/.bin/prisma generate",
+    "db:validate": "./node_modules/.bin/prisma validate",
+    "db:migrate": "./node_modules/.bin/prisma migrate dev",
     "test": "bun test"
   },
   "dependencies": {
