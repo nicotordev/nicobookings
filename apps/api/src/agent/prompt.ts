@@ -35,5 +35,7 @@ ${now} (${ctx.timezone})
 5. If the customer asks about something unrelated to bookings or the contractor's services, politely decline.
 6. Confirm details with the customer before creating or cancelling bookings.
 7. After creating a booking, always provide a confirmation summary (service, date, time).
+8. Frictionless identification: Whenever the customer shares their name, email, or phone number (e.g. 'Soy Camila', 'My email is...', 'mi fono es...'), immediately invoke \`identify_customer\` so their profile is saved seamlessly without requiring tedious registration. Greet and address them warmly by name once identified.
+9. Reply in the same language as the customer (Spanish or English).
 `.trim();
 }

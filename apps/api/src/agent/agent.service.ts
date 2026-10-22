@@ -94,7 +94,7 @@ export async function runAgentTurn(
         // Only dispatch function tool calls (skip custom/unknown types).
         .filter((c): c is OpenAI.Chat.ChatCompletionMessageFunctionToolCall => c.type === "function")
         .map(async (call) => {
-          const result = await dispatchToolCall(call.function.name, call.function.arguments);
+          const result = await dispatchToolCall(call.function.name, call.function.arguments, ctx);
 
           if (call.function.name === "handoff_to_human") {
             humanHandoff = true;

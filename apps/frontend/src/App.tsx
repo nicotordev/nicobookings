@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
-import type { ChatMessage } from "./types/chat";
-import { sendChatMessage } from "./services/api";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import type { ChatMessage, CustomerProfile } from "./types/chat";
+import { fetchConversationMessages, sendChatMessage } from "./services/api";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatMessageItem } from "./components/ChatMessageItem";
 import { ChatInput } from "./components/ChatInput";
@@ -22,6 +22,31 @@ export const App: React.FC = () => {
     return created;
   });
 
+  // Frictionless customer identity
+  const [customer, setCustomer] = useState<CustomerProfile | undefined>(() => {
+    const name = urlParams.get("name");
+    const email = urlParams.get("email");
+    const phone = urlParams.get("phone");
+    if (name || email || phone) {
+      const fromUrl: CustomerProfile = {
+        name: name || undefined,
+        email: email || undefined,
+        phone: phone || undefined,
+      };
+      localStorage.setItem("nicobookings_customer", JSON.stringify(fromUrl));
+      return fromUrl;
+    }
+    const stored = localStorage.getItem("nicobookings_customer");
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  });
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -37,9 +62,50 @@ export const App: React.FC = () => {
     scrollToBottom();
   }, [messages, isLoading]);
 
+  // Poll for replies when handed off to human support
+  const pollMessages = useCallback(async () => {
+    if (!conversationId) return;
+    try {
+      const data = await fetchConversationMessages(conversationId);
+      if (data.messages && data.messages.length > 0) {
+        setMessages((prev) => {
+          // If message counts or contents differ, sync with latest
+          if (data.messages.length > prev.length) {
+            return data.messages;
+          }
+          return prev;
+        });
+      }
+
+      if (data.customer && (!customer?.name || customer.name === "Guest Customer")) {
+        setCustomer(data.customer);
+        localStorage.setItem("nicobookings_customer", JSON.stringify(data.customer));
+      }
+
+      if (data.status === "ACTIVE" && isHandedOff) {
+        setIsHandedOff(false);
+      } else if (data.status === "HUMAN_HANDOFF" && !isHandedOff) {
+        setIsHandedOff(true);
+      }
+    } catch {
+      // Quiet fail on polling error
+    }
+  }, [conversationId, isHandedOff, customer]);
+
+  useEffect(() => {
+    if (!isHandedOff) return;
+    const interval = setInterval(pollMessages, 3000);
+    return () => clearInterval(interval);
+  }, [isHandedOff, pollMessages]);
+
+  const handleUpdateCustomer = (profile: CustomerProfile) => {
+    setCustomer(profile);
+    localStorage.setItem("nicobookings_customer", JSON.stringify(profile));
+  };
+
   const handleSend = async (messageText?: string) => {
     const textToSend = (messageText ?? input).trim();
-    if (!textToSend || isLoading || isHandedOff) return;
+    if (!textToSend || isLoading) return;
 
     const userMessage: ChatMessage = {
       id: "msg_" + Math.random().toString(36).substring(2, 9),
@@ -53,11 +119,16 @@ export const App: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const response = await sendChatMessage(conversationId, textToSend);
+      const response = await sendChatMessage(conversationId, textToSend, customer);
 
       if (response.conversationId && response.conversationId !== conversationId) {
         setConversationId(response.conversationId);
         sessionStorage.setItem("nicobookings_conversation_id", response.conversationId);
+      }
+
+      if (response.customer) {
+        setCustomer(response.customer);
+        localStorage.setItem("nicobookings_customer", JSON.stringify(response.customer));
       }
 
       const assistantMessage: ChatMessage = {
@@ -65,6 +136,7 @@ export const App: React.FC = () => {
         role: "assistant",
         content: response.reply,
         timestamp: new Date(),
+        metadata: response.isStaffMode ? { author: "staff" } : null,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -102,6 +174,8 @@ export const App: React.FC = () => {
         <ChatHeader
           contractorName={initialContractor}
           isHandedOff={isHandedOff}
+          customer={customer}
+          onUpdateCustomer={handleUpdateCustomer}
           onReset={handleResetConversation}
         />
 
@@ -137,7 +211,8 @@ export const App: React.FC = () => {
           setInput={setInput}
           onSend={() => handleSend()}
           isLoading={isLoading}
-          disabled={isHandedOff}
+          disabled={false}
+          placeholder={isHandedOff ? "Message human support specialist..." : "Ask a question or book an appointment..."}
         />
       </main>
     </div>

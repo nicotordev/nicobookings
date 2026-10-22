@@ -148,4 +148,32 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
       strict: true,
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "identify_customer",
+      description:
+        "Seamlessly records or updates the customer's name, email, or phone number in their profile. Call this as soon as the customer mentions who they are or provides contact info.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Customer full name.",
+          },
+          email: {
+            type: "string",
+            description: "Customer email address.",
+          },
+          phone: {
+            type: "string",
+            description: "Customer phone number.",
+          },
+        },
+        required: ["name", "email", "phone"],
+        additionalProperties: false,
+      },
+      strict: true,
+    },
+  },
 ];

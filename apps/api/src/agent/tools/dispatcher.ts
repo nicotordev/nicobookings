@@ -4,7 +4,9 @@ import {
   createBooking,
   cancelBooking,
   handoffToHuman,
+  identifyCustomer,
 } from "./executors.js";
+import type { AgentContext } from "../types.js";
 
 type ToolResult = Record<string, unknown>;
 
@@ -15,6 +17,7 @@ type ToolResult = Record<string, unknown>;
 export async function dispatchToolCall(
   toolName: string,
   rawArgs: string,
+  ctx?: AgentContext,
 ): Promise<ToolResult> {
   let args: Record<string, unknown>;
 
@@ -26,13 +29,13 @@ export async function dispatchToolCall(
 
   switch (toolName) {
     case "list_services": {
-      const contractorId = args["contractorId"] as string;
+      const contractorId = (args["contractorId"] as string) || ctx?.contractorId || "";
       return listServices(contractorId);
     }
 
     case "get_availability": {
       return getAvailability(
-        args["contractorId"] as string,
+        (args["contractorId"] as string) || ctx?.contractorId || "",
         args["serviceId"] as string,
         args["dateFrom"] as string,
         args["dateTo"] as string,
@@ -41,10 +44,10 @@ export async function dispatchToolCall(
 
     case "create_booking": {
       return createBooking({
-        contractorId: args["contractorId"] as string,
-        customerId: args["customerId"] as string,
+        contractorId: (args["contractorId"] as string) || ctx?.contractorId || "",
+        customerId: (args["customerId"] as string) || ctx?.customerId || "",
         serviceId: args["serviceId"] as string,
-        conversationId: args["conversationId"] as string,
+        conversationId: (args["conversationId"] as string) || ctx?.conversationId || "",
         startsAt: args["startsAt"] as string,
         notes: (args["notes"] as string) ?? "",
       });
@@ -53,15 +56,27 @@ export async function dispatchToolCall(
     case "cancel_booking": {
       return cancelBooking(
         args["bookingId"] as string,
-        args["customerId"] as string,
+        (args["customerId"] as string) || ctx?.customerId || "",
       );
     }
 
     case "handoff_to_human": {
       return handoffToHuman({
-        conversationId: args["conversationId"] as string,
-        contractorId: args["contractorId"] as string,
-        reason: args["reason"] as string,
+        conversationId: (args["conversationId"] as string) || ctx?.conversationId || "",
+        contractorId: (args["contractorId"] as string) || ctx?.contractorId || "",
+        reason: (args["reason"] as string) || "Customer requested human specialist.",
+      });
+    }
+
+    case "identify_customer": {
+      const contractorId = ctx?.contractorId || "";
+      const conversationId = ctx?.conversationId || "";
+      const customerId = ctx?.customerId || "";
+
+      return identifyCustomer(contractorId, conversationId, customerId, {
+        name: args["name"] as string | undefined,
+        email: args["email"] as string | undefined,
+        phone: args["phone"] as string | undefined,
       });
     }
 

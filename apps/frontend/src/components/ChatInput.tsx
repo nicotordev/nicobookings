@@ -7,6 +7,7 @@ interface ChatInputProps {
   onSend: () => void;
   isLoading: boolean;
   disabled: boolean;
+  placeholder?: string;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -15,6 +16,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   isLoading,
   disabled,
+  placeholder,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -53,7 +55,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={disabled ? "Conversation handed off to human agent..." : "Type your message or inquiry..."}
+          placeholder={placeholder || (disabled ? "Conversation handed off to human agent..." : "Type your message or inquiry...")}
           disabled={disabled || isLoading}
           rows={1}
           className="flex-1 bg-transparent px-3 py-2 text-sm text-slate-100 placeholder-slate-500 resize-none outline-none max-h-36 disabled:opacity-50"

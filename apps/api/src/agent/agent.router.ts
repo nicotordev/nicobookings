@@ -19,13 +19,65 @@ export const agentRouter = new Hono();
  * The conversation must already exist in the DB.
  * Message history is loaded from the DB so the agent has full context.
  */
+import { extractIdentityFromText, linkOrUpdateCustomer } from "./customer.service.js";
+
+/**
+ * GET /api/agent/conversation/:id/messages
+ * Allows customer chat widget to fetch all messages and check status
+ */
+agentRouter.get("/conversation/:id/messages", async (c) => {
+  const id = c.req.param("id");
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  if (!isUuid) {
+    return c.json({ messages: [], status: "ACTIVE", customer: null });
+  }
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { id },
+    include: {
+      messages: {
+        where: { role: { in: ["USER", "ASSISTANT"] } },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          role: true,
+          content: true,
+          createdAt: true,
+          metadata: true,
+        },
+      },
+      customer: { select: { id: true, name: true, email: true, phone: true } },
+    },
+  });
+
+  if (!conversation) {
+    return c.json({ messages: [], status: "ACTIVE", customer: null });
+  }
+
+  return c.json({
+    status: conversation.status,
+    customer: conversation.customer,
+    messages: conversation.messages.map((m) => ({
+      id: m.id,
+      role: m.role.toLowerCase(),
+      content: m.content,
+      timestamp: m.createdAt.toISOString(),
+      metadata: m.metadata,
+    })),
+  });
+});
+
+/**
+ * POST /api/agent/chat
+ */
 agentRouter.post("/chat", async (c) => {
   const body = await c.req.json<{
     conversationId: string;
     message: string;
+    customerInfo?: { name?: string; email?: string; phone?: string };
   }>();
 
-  const { conversationId, message } = body;
+  const { conversationId, message, customerInfo } = body;
 
   if (!conversationId || !message?.trim()) {
     return c.json({ error: "conversationId and message are required." }, 400);
@@ -42,7 +94,7 @@ agentRouter.post("/chat", async (c) => {
         where: { id: conversationId },
         include: {
           contractor: { select: { id: true, name: true, timezone: true } },
-          customer: { select: { id: true } },
+          customer: { select: { id: true, name: true, email: true, phone: true } },
           messages: {
             where: { role: { in: ["USER", "ASSISTANT"] } },
             orderBy: { createdAt: "asc" },
@@ -77,10 +129,11 @@ agentRouter.post("/chat", async (c) => {
     const customer = await prisma.customer.create({
       data: {
         contractorId: contractor.id,
-        name: "Guest Customer",
-        email: `guest_${Date.now()}@example.com`,
+        name: customerInfo?.name?.trim() || "Guest Customer",
+        email: customerInfo?.email?.trim().toLowerCase() || `guest_${Date.now()}@example.com`,
+        phone: customerInfo?.phone?.trim() || null,
       },
-      select: { id: true },
+      select: { id: true, name: true, email: true, phone: true },
     });
 
     conversation = await prisma.conversation.create({
@@ -91,7 +144,7 @@ agentRouter.post("/chat", async (c) => {
       },
       include: {
         contractor: { select: { id: true, name: true, timezone: true } },
-        customer: { select: { id: true } },
+        customer: { select: { id: true, name: true, email: true, phone: true } },
         messages: {
           where: { role: { in: ["USER", "ASSISTANT"] } },
           orderBy: { createdAt: "asc" },
@@ -101,11 +154,62 @@ agentRouter.post("/chat", async (c) => {
     });
   }
 
-  if (conversation.status === "CLOSED" || conversation.status === "HUMAN_HANDOFF") {
-    return c.json(
-      { error: `Conversation is ${conversation.status.toLowerCase()}.` },
-      409,
-    );
+  // Seamless customer identification from message or body
+  const extracted = extractIdentityFromText(message);
+  const candidateIdentity = {
+    name: customerInfo?.name || extracted.name,
+    email: customerInfo?.email || extracted.email,
+    phone: customerInfo?.phone || extracted.phone,
+  };
+
+  if (candidateIdentity.name || candidateIdentity.email || candidateIdentity.phone) {
+    try {
+      const updatedCust = await linkOrUpdateCustomer({
+        contractorId: conversation.contractor.id,
+        conversationId: conversation.id,
+        currentCustomerId: conversation.customer.id,
+        name: candidateIdentity.name,
+        email: candidateIdentity.email,
+        phone: candidateIdentity.phone,
+      });
+      if (updatedCust) {
+        conversation.customer = updatedCust;
+      }
+    } catch (err) {
+      console.warn("Frictionless identity resolution non-fatal warning:", err);
+    }
+  }
+
+  // If conversation is closed
+  if (conversation.status === "CLOSED") {
+    return c.json({ error: "Conversation is closed." }, 409);
+  }
+
+  // If conversation is escalated to HUMAN_HANDOFF, save the user message and keep continuity!
+  if (conversation.status === "HUMAN_HANDOFF") {
+    await prisma.$transaction([
+      prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          role: "USER",
+          content: message,
+          channel: conversation.channel,
+        },
+      }),
+      prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date() },
+      }),
+    ]);
+
+    return c.json({
+      conversationId: conversation.id,
+      reply: "Tu mensaje fue recibido por nuestro equipo de atención humana. Un especialista te responderá directamente aquí a la brevedad.",
+      humanHandoff: true,
+      isStaffMode: true,
+      customer: conversation.customer,
+      latencyMs: 15,
+    });
   }
 
   // Map DB messages to OpenAI format.
@@ -157,6 +261,7 @@ agentRouter.post("/chat", async (c) => {
     conversationId: conversation.id,
     reply: result.reply,
     humanHandoff: result.humanHandoff,
+    customer: conversation.customer,
     latencyMs: result.latencyMs,
   });
 });

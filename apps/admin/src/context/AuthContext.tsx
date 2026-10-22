@@ -20,7 +20,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const checkAuth = async () => {
     try {
       const response = await fetch("/api/auth/me", {
-        credentials: "same-origin",
+        credentials: "include",
       });
 
       if (response.ok) {
@@ -45,7 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
-        credentials: "same-origin",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
@@ -72,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
-        credentials: "same-origin",
+        credentials: "include",
       });
     } finally {
       setUser(null);

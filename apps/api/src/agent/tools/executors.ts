@@ -1,5 +1,6 @@
 import { prisma } from "../../db.js";
 import type { BookingStatus, HandoffStatus } from "../../generated/prisma/enums.js";
+import { linkOrUpdateCustomer } from "../customer.service.js";
 
 /* ------------------------------------------------------------------ */
 /*  list_services                                                        */
@@ -232,5 +233,35 @@ export async function handoffToHuman(params: {
       reason: handoff.reason,
       message: "A human agent will be with you shortly.",
     },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  identify_customer                                                    */
+/* ------------------------------------------------------------------ */
+
+export async function identifyCustomer(
+  contractorId: string,
+  conversationId: string,
+  customerId: string,
+  data: { name?: string; email?: string; phone?: string },
+) {
+  const updated = await linkOrUpdateCustomer({
+    contractorId,
+    conversationId,
+    currentCustomerId: customerId,
+    name: data.name,
+    email: data.email,
+    phone: data.phone,
+  });
+
+  return {
+    customer: {
+      id: updated?.id ?? customerId,
+      name: updated?.name ?? data.name,
+      email: updated?.email ?? data.email,
+      phone: updated?.phone ?? data.phone,
+    },
+    message: "Customer profile identified and updated successfully.",
   };
 }
