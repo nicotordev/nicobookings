@@ -12,6 +12,7 @@
     "dev:api": "bun run --filter @nicobookings/api dev",
     "dev:frontend": "bun run --filter @nicobookings/frontend dev",
     "dev:admin": "bun run --filter @nicobookings/admin dev",
-    "build": "bun run --filter @nicobookings/frontend build && bun run --filter @nicobookings/admin build"
+    "db:generate": "bun run --filter=@nicobookings/api db:generate",
+    "build": "bun run db:generate && bun run --filter=@nicobookings/frontend build && bun run --filter=@nicobookings/admin build"
   }
 }
