@@ -14,11 +14,14 @@ export const App: React.FC = () => {
 
   const [conversationId, setConversationId] = useState<string>(() => {
     const fromUrl = urlParams.get("conversationId");
-    if (fromUrl) return fromUrl;
-    const stored = sessionStorage.getItem("nicobookings_conversation_id");
+    if (fromUrl) {
+      localStorage.setItem("nicobookings_conversation_id", fromUrl);
+      return fromUrl;
+    }
+    const stored = localStorage.getItem("nicobookings_conversation_id");
     if (stored) return stored;
-    const created = "conv_" + Math.random().toString(36).substring(2, 10);
-    sessionStorage.setItem("nicobookings_conversation_id", created);
+    const created = crypto.randomUUID();
+    localStorage.setItem("nicobookings_conversation_id", created);
     return created;
   });
 
@@ -61,6 +64,25 @@ export const App: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  // Load message history on initial load or conversation change
+  useEffect(() => {
+    if (!conversationId) return;
+    fetchConversationMessages(conversationId)
+      .then((data) => {
+        if (data.messages && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+        if (data.customer && (!customer?.name || customer.name === "Guest Customer")) {
+          setCustomer(data.customer);
+          localStorage.setItem("nicobookings_customer", JSON.stringify(data.customer));
+        }
+        if (data.status === "HUMAN_HANDOFF") {
+          setIsHandedOff(true);
+        }
+      })
+      .catch(() => {});
+  }, [conversationId]);
 
   // Poll for replies when handed off to human support
   const pollMessages = useCallback(async () => {
@@ -123,7 +145,7 @@ export const App: React.FC = () => {
 
       if (response.conversationId && response.conversationId !== conversationId) {
         setConversationId(response.conversationId);
-        sessionStorage.setItem("nicobookings_conversation_id", response.conversationId);
+        localStorage.setItem("nicobookings_conversation_id", response.conversationId);
       }
 
       if (response.customer) {
@@ -161,8 +183,8 @@ export const App: React.FC = () => {
   };
 
   const handleResetConversation = () => {
-    const newId = "conv_" + Math.random().toString(36).substring(2, 10);
-    sessionStorage.setItem("nicobookings_conversation_id", newId);
+    const newId = crypto.randomUUID();
+    localStorage.setItem("nicobookings_conversation_id", newId);
     setConversationId(newId);
     setMessages([]);
     setIsHandedOff(false);

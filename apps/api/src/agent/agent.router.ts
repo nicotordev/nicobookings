@@ -138,6 +138,7 @@ agentRouter.post("/chat", async (c) => {
 
     conversation = await prisma.conversation.create({
       data: {
+        id: isUuid ? conversationId : undefined,
         contractorId: contractor.id,
         customerId: customer.id,
         channel: "WEB",
@@ -202,9 +203,14 @@ agentRouter.post("/chat", async (c) => {
       }),
     ]);
 
+    const isSpanish = /[áéíóúñ¿¡]|\b(hola|gracias|quiero|reserva|turno|servicio|hora|dia|buenos|buenas|por favor|ayuda)\b/i.test(message);
+    const reply = isSpanish
+      ? "Tu mensaje fue recibido por nuestro equipo de atención humana. Un especialista te responderá directamente aquí a la brevedad."
+      : "Your message has been received by our support team. A specialist will reply to you directly here shortly.";
+
     return c.json({
       conversationId: conversation.id,
-      reply: "Tu mensaje fue recibido por nuestro equipo de atención humana. Un especialista te responderá directamente aquí a la brevedad.",
+      reply,
       humanHandoff: true,
       isStaffMode: true,
       customer: conversation.customer,
