@@ -19,7 +19,12 @@ export const agentRouter = new Hono();
  * The conversation must already exist in the DB.
  * Message history is loaded from the DB so the agent has full context.
  */
-import { extractIdentityFromText, linkOrUpdateCustomer } from "./customer.service.js";
+import {
+  extractIdentityFromText,
+  findOrCreateCustomer,
+  linkOrUpdateCustomer,
+} from "./customer.service.js";
+import { preferRealIdentity } from "./customer.identity.js";
 
 /**
  * GET /api/agent/conversation/:id/messages
@@ -126,14 +131,11 @@ agentRouter.post("/chat", async (c) => {
       });
     }
 
-    const customer = await prisma.customer.create({
-      data: {
-        contractorId: contractor.id,
-        name: customerInfo?.name?.trim() || "Guest Customer",
-        email: customerInfo?.email?.trim().toLowerCase() || `guest_${Date.now()}@example.com`,
-        phone: customerInfo?.phone?.trim() || null,
-      },
-      select: { id: true, name: true, email: true, phone: true },
+    const customer = await findOrCreateCustomer({
+      contractorId: contractor.id,
+      name: customerInfo?.name,
+      email: customerInfo?.email,
+      phone: customerInfo?.phone,
     });
 
     conversation = await prisma.conversation.create({
@@ -157,11 +159,10 @@ agentRouter.post("/chat", async (c) => {
 
   // Seamless customer identification from message or body
   const extracted = extractIdentityFromText(message);
-  const candidateIdentity = {
-    name: customerInfo?.name || extracted.name,
-    email: customerInfo?.email || extracted.email,
-    phone: customerInfo?.phone || extracted.phone,
-  };
+  const candidateIdentity = preferRealIdentity({
+    provided: customerInfo,
+    extracted,
+  });
 
   if (candidateIdentity.name || candidateIdentity.email || candidateIdentity.phone) {
     try {

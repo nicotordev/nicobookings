@@ -1,4 +1,5 @@
 import { prisma } from "../db.js";
+import { isUniqueConstraintError } from "./customer.identity.js";
 
 /**
  * Regular expressions for automatic frictionless identification
@@ -43,6 +44,86 @@ export function extractIdentityFromText(text: string): {
   }
 
   return result;
+}
+
+const customerSummarySelect = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+} as const;
+
+export type CustomerSummary = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+};
+
+async function findCustomerByIdentity(
+  contractorId: string,
+  email: string | null,
+  phone: string | null,
+): Promise<CustomerSummary | null> {
+  if (email) {
+    const byEmail = await prisma.customer.findUnique({
+      where: { contractorId_email: { contractorId, email } },
+      select: customerSummarySelect,
+    });
+    if (byEmail) return byEmail;
+  }
+
+  if (phone) {
+    return prisma.customer.findUnique({
+      where: { contractorId_phone: { contractorId, phone } },
+      select: customerSummarySelect,
+    });
+  }
+
+  return null;
+}
+
+/**
+ * Starts a conversation for a visitor who already has a profile, or creates one.
+ * Repeating a stored guest email (conversation reset, retries) reuses that row
+ * instead of inserting a duplicate `(contractorId, email)`.
+ */
+export async function findOrCreateCustomer(params: {
+  contractorId: string;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}): Promise<CustomerSummary> {
+  const name = params.name?.trim() || "Guest Customer";
+  const email = params.email?.trim().toLowerCase() || null;
+  const phone = params.phone?.trim() || null;
+
+  const existing = await findCustomerByIdentity(params.contractorId, email, phone);
+  if (existing) return existing;
+
+  const createEmail = email ?? `guest_${crypto.randomUUID()}@example.com`;
+
+  try {
+    return await prisma.customer.create({
+      data: {
+        contractorId: params.contractorId,
+        name,
+        email: createEmail,
+        phone,
+      },
+      select: customerSummarySelect,
+    });
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error;
+
+    const raced = await findCustomerByIdentity(
+      params.contractorId,
+      email ?? createEmail,
+      phone,
+    );
+    if (raced) return raced;
+    throw error;
+  }
 }
 
 /**
