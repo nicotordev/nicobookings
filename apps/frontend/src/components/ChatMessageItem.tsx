@@ -28,6 +28,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message }) => 
 
   return (
     <div
+      data-testid={isUser ? "message-user" : isStaff ? "message-staff" : "message-assistant"}
       className={`flex gap-3 px-4 py-2 ${
         isUser ? "flex-row-reverse" : "flex-row"
       } animate-in fade-in slide-in-from-bottom-2 duration-200`}

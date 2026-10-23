@@ -2,6 +2,7 @@ import {
   listServices,
   getAvailability,
   createBooking,
+  listCustomerBookings,
   cancelBooking,
   handoffToHuman,
   identifyCustomer,
@@ -27,6 +28,19 @@ export async function dispatchToolCall(
     return { error: `Invalid JSON arguments for tool "${toolName}".` };
   }
 
+  try {
+    return await runTool(toolName, args, ctx);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Tool execution failed.";
+    return { error: message };
+  }
+}
+
+async function runTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  ctx?: AgentContext,
+): Promise<ToolResult> {
   switch (toolName) {
     case "list_services": {
       const contractorId = (args["contractorId"] as string) || ctx?.contractorId || "";
@@ -36,7 +50,8 @@ export async function dispatchToolCall(
     case "get_availability": {
       return getAvailability(
         (args["contractorId"] as string) || ctx?.contractorId || "",
-        args["serviceId"] as string,
+        (args["serviceId"] as string) || "",
+        (args["serviceName"] as string) || "",
         args["dateFrom"] as string,
         args["dateTo"] as string,
       );
@@ -46,11 +61,19 @@ export async function dispatchToolCall(
       return createBooking({
         contractorId: (args["contractorId"] as string) || ctx?.contractorId || "",
         customerId: (args["customerId"] as string) || ctx?.customerId || "",
-        serviceId: args["serviceId"] as string,
+        serviceId: (args["serviceId"] as string) || "",
+        serviceName: (args["serviceName"] as string) || "",
         conversationId: (args["conversationId"] as string) || ctx?.conversationId || "",
         startsAt: args["startsAt"] as string,
         notes: (args["notes"] as string) ?? "",
       });
+    }
+
+    case "list_customer_bookings": {
+      return listCustomerBookings(
+        (args["customerId"] as string) || ctx?.customerId || "",
+        (args["contractorId"] as string) || ctx?.contractorId || "",
+      );
     }
 
     case "cancel_booking": {

@@ -1,6 +1,7 @@
 
 import 'dotenv/config';
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { cors } from "hono/cors";
 import { authRouter } from "./auth/auth.js";
 import { agentRouter } from "./agent/agent.router.js";
@@ -26,6 +27,12 @@ app.use(
     credentials: true,
   }),
 );
+
+app.onError((error, c) => {
+  if (error instanceof HTTPException) return error.getResponse();
+  console.error(error);
+  return c.json({ error: "Internal server error." }, 500);
+});
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 app.route("/api/auth", authRouter);

@@ -7,7 +7,7 @@ interface HandoffNoticeProps {
 
 export const HandoffNotice: React.FC<HandoffNoticeProps> = ({ onReset }) => {
   return (
-    <div className="mx-4 my-3 p-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/30 flex items-start gap-3 text-amber-200 text-xs shadow-sm animate-in fade-in duration-200">
+    <div data-testid="handoff-notice" className="mx-4 my-3 p-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/30 flex items-start gap-3 text-amber-200 text-xs shadow-sm animate-in fade-in duration-200">
       <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
         <UserCheck className="w-4 h-4" />
       </div>

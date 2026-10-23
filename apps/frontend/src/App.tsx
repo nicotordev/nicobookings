@@ -91,11 +91,12 @@ export const App: React.FC = () => {
       const data = await fetchConversationMessages(conversationId);
       if (data.messages && data.messages.length > 0) {
         setMessages((prev) => {
-          // If message counts or contents differ, sync with latest
-          if (data.messages.length > prev.length) {
-            return data.messages;
+          const knownIds = new Set(prev.map((message) => message.id));
+          const serverHasNewMessage = data.messages.some((message) => !knownIds.has(message.id));
+          if (!serverHasNewMessage || data.messages.length < prev.length) {
+            return prev;
           }
-          return prev;
+          return data.messages;
         });
       }
 
@@ -211,7 +212,7 @@ export const App: React.FC = () => {
           )}
 
           {isLoading && (
-            <div className="flex items-center gap-3 px-4 py-2 animate-in fade-in duration-200">
+            <div data-testid="chat-pending" className="flex items-center gap-3 px-4 py-2 animate-in fade-in duration-200">
               <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700/60 flex items-center justify-center text-indigo-400 shrink-0">
                 <Bot className="w-4 h-4" />
               </div>

@@ -23,6 +23,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.production.local
 .env.local
 
+# playwright
+e2e/report
+e2e/test-results
+playwright-report
+test-results
+
 # caches
 .eslintcache
 .cache

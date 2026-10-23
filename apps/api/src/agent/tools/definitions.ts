@@ -30,7 +30,7 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "get_availability",
       description:
-        "Returns available time slots for a given service and date range. Use this before creating a booking to confirm the slot is free.",
+        "Returns free slots for a service. Business hours are 09:00–18:00 in the contractor timezone. A window of 36 hours or less is the full local calendar day, so 10:00 UTC still includes 10:00 local. Tell the customer localStart. Pass startsAt to create_booking only after they accept that exact time.",
       parameters: {
         type: "object",
         properties: {
@@ -40,7 +40,11 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
           },
           serviceId: {
             type: "string",
-            description: "UUID of the service the customer wants to book.",
+            description: "UUID of the service. Use an empty string when you pass serviceName.",
+          },
+          serviceName: {
+            type: "string",
+            description: "Exact catalog name, such as Haircut & Styling. Required when serviceId is empty.",
           },
           dateFrom: {
             type: "string",
@@ -51,7 +55,7 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
             description: "End of the search window in ISO 8601 format (e.g. 2025-01-20T23:59:59Z).",
           },
         },
-        required: ["contractorId", "serviceId", "dateFrom", "dateTo"],
+        required: ["contractorId", "serviceId", "serviceName", "dateFrom", "dateTo"],
         additionalProperties: false,
       },
       strict: true,
@@ -62,7 +66,7 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: "create_booking",
       description:
-        "Creates a confirmed booking for the customer. Always call get_availability first to ensure the slot is available.",
+        "Creates one confirmed booking for a startsAt the customer explicitly requested or accepted. If that time is busy or outside business hours, do not book another time. Offer up to 3 localStart alternatives and wait.",
       parameters: {
         type: "object",
         properties: {
@@ -76,7 +80,11 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
           },
           serviceId: {
             type: "string",
-            description: "UUID of the service to book.",
+            description: "UUID of the service. Use an empty string when you pass serviceName.",
+          },
+          serviceName: {
+            type: "string",
+            description: "Exact catalog name, such as Haircut & Styling.",
           },
           conversationId: {
             type: "string",
@@ -91,7 +99,31 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
             description: "Optional notes from the customer.",
           },
         },
-        required: ["contractorId", "customerId", "serviceId", "conversationId", "startsAt", "notes"],
+        required: ["contractorId", "customerId", "serviceId", "serviceName", "conversationId", "startsAt", "notes"],
+        additionalProperties: false,
+      },
+      strict: true,
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_customer_bookings",
+      description:
+        "Lists this customer's upcoming appointments. Use the id only inside cancel_booking. Describe each appointment to the customer by serviceName and localStart.",
+      parameters: {
+        type: "object",
+        properties: {
+          customerId: {
+            type: "string",
+            description: "UUID of the customer.",
+          },
+          contractorId: {
+            type: "string",
+            description: "UUID of the contractor.",
+          },
+        },
+        required: ["customerId", "contractorId"],
         additionalProperties: false,
       },
       strict: true,
@@ -101,7 +133,8 @@ export const AGENT_TOOL_DEFINITIONS: OpenAI.Chat.ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "cancel_booking",
-      description: "Cancels an existing booking by its ID.",
+      description:
+        "Cancels one upcoming appointment after the customer confirms that cancellation. Find the id with list_customer_bookings. Do not ask the customer for an id.",
       parameters: {
         type: "object",
         properties: {

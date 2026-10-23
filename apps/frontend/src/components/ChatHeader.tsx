@@ -70,6 +70,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
         <div className="flex items-center gap-2">
           {/* Frictionless identity pill */}
           <button
+            data-testid="identity-toggle"
             onClick={() => {
               setName(customer?.name && customer.name !== "Guest Customer" ? customer.name : "");
               setEmail(customer?.email?.startsWith("guest_") ? "" : customer?.email || "");
@@ -114,6 +115,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input
               type="text"
+              data-testid="identity-name"
               placeholder="Your name"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -121,6 +123,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
             />
             <input
               type="email"
+              data-testid="identity-email"
               placeholder="Your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -130,6 +133,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="submit"
+              data-testid="identity-save"
               className="flex items-center gap-1 px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors"
             >
               <Check className="w-3 h-3" />

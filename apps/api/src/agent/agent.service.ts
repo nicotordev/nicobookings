@@ -2,9 +2,10 @@ import OpenAI from "openai";
 import { AGENT_TOOL_DEFINITIONS } from "./tools/definitions.js";
 import { dispatchToolCall } from "./tools/dispatcher.js";
 import { buildSystemPrompt } from "./prompt.js";
+import { detectCustomerLanguage, replyMismatchesLanguage } from "./reply-language.js";
 import type { AgentContext, AgentMessage, AgentTurnResult } from "./types.js";
 
-const AGENT_MODEL = "gpt-4.1-mini";
+const AGENT_MODEL = "gpt-5.4-mini";
 /** Maximum tool-call rounds per turn to prevent infinite loops. */
 const MAX_TOOL_ROUNDS = 10;
 
@@ -22,6 +23,24 @@ let _client: OpenAI | null = null;
 function openai(): OpenAI {
   _client ??= getOpenAIClient();
   return _client;
+}
+
+async function alignReplyLanguage(reply: string, userMessage: string): Promise<string> {
+  const language = detectCustomerLanguage(userMessage);
+  if (!reply.trim() || !replyMismatchesLanguage(reply, language)) return reply;
+
+  const rewritten = await openai().chat.completions.create({
+    model: AGENT_MODEL,
+    messages: [
+      {
+        role: "system",
+        content: `Rewrite this assistant reply in ${language}. Keep service names, prices, dates, and times unchanged. "Haircut & Styling" and "Consultation" stay in English. Return only the rewritten reply.`,
+      },
+      { role: "user", content: reply },
+    ],
+  });
+
+  return rewritten.choices[0]?.message.content?.trim() || reply;
 }
 
 /* ------------------------------------------------------------------ */
@@ -50,7 +69,7 @@ export async function runAgentTurn(
   const startedAt = Date.now();
 
   const messages: AgentMessage[] = [
-    { role: "system", content: buildSystemPrompt(ctx) },
+    { role: "system", content: buildSystemPrompt(ctx, userMessage) },
     ...history,
     { role: "user", content: userMessage },
   ];
@@ -81,7 +100,7 @@ export async function runAgentTurn(
     // No tool calls → final answer.
     if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
       return {
-        reply: assistantMsg.content ?? "",
+        reply: await alignReplyLanguage(assistantMsg.content ?? "", userMessage),
         humanHandoff,
         usage,
         latencyMs: Date.now() - startedAt,
@@ -125,7 +144,10 @@ export async function runAgentTurn(
   usage = fallback.usage ?? usage;
 
   return {
-    reply: fallback.choices[0]?.message.content ?? "I'm sorry, something went wrong. Please try again.",
+    reply: await alignReplyLanguage(
+      fallback.choices[0]?.message.content ?? "I'm sorry, something went wrong. Please try again.",
+      userMessage,
+    ),
     humanHandoff,
     usage,
     latencyMs: Date.now() - startedAt,

@@ -52,6 +52,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       >
         <textarea
           ref={textareaRef}
+          data-testid="chat-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -63,6 +64,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
         <button
           type="submit"
+          data-testid="chat-send"
           disabled={!input.trim() || isLoading || disabled}
           className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white disabled:opacity-40 disabled:hover:from-indigo-600 hover:from-indigo-500 hover:to-violet-500 transition-all shadow-md shadow-indigo-600/20 shrink-0"
         >

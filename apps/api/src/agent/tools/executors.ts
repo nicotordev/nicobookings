@@ -1,10 +1,44 @@
 import { prisma } from "../../db.js";
 import type { BookingStatus, HandoffStatus } from "../../generated/prisma/enums.js";
+import { isUniqueConstraintError } from "../customer.identity.js";
 import { linkOrUpdateCustomer } from "../customer.service.js";
+import {
+  buildAvailableSlots,
+  formatLocal,
+  isInsideBusinessHours,
+  searchWindow,
+} from "./slots.js";
+
+const DEFAULT_TIMEZONE = "America/Santiago";
+
+async function contractorTimezone(contractorId: string): Promise<string> {
+  const contractor = await prisma.contractor.findUnique({
+    where: { id: contractorId },
+    select: { timezone: true },
+  });
+  return contractor?.timezone || DEFAULT_TIMEZONE;
+}
 
 /* ------------------------------------------------------------------ */
 /*  list_services                                                        */
 /* ------------------------------------------------------------------ */
+
+async function resolveService(contractorId: string, serviceId: string, serviceName: string) {
+  const select = { id: true, name: true, durationMins: true } as const;
+  if (serviceId) {
+    const byId = await prisma.service.findFirst({
+      where: { id: serviceId, contractorId, isActive: true },
+      select,
+    });
+    if (byId) return byId;
+  }
+  const name = serviceName.trim();
+  if (!name) return null;
+  return prisma.service.findFirst({
+    where: { contractorId, isActive: true, name: { equals: name, mode: "insensitive" } },
+    select,
+  });
+}
 
 export async function listServices(contractorId: string) {
   const services = await prisma.service.findMany({
@@ -29,64 +63,48 @@ export async function listServices(contractorId: string) {
 export async function getAvailability(
   contractorId: string,
   serviceId: string,
+  serviceName: string,
   dateFrom: string,
   dateTo: string,
 ) {
-  const service = await prisma.service.findFirst({
-    where: { id: serviceId, contractorId, isActive: true },
-    select: { durationMins: true, name: true },
-  });
+  const service = await resolveService(contractorId, serviceId, serviceName);
 
   if (!service) {
-    return { error: "Service not found or inactive." };
+    return { error: "Service not found or inactive. Pass the exact service name from list_services." };
   }
 
-  // Fetch existing confirmed/pending bookings that overlap the window.
+  const requestedFrom = new Date(dateFrom);
+  const requestedTo = new Date(dateTo);
+  if (Number.isNaN(requestedFrom.getTime()) || Number.isNaN(requestedTo.getTime()) || requestedTo <= requestedFrom) {
+    return { error: "dateFrom and dateTo must be a valid range." };
+  }
+
+  const timeZone = await contractorTimezone(contractorId);
+  const window = searchWindow(requestedFrom, requestedTo, timeZone);
+
   const existingBookings = await prisma.booking.findMany({
     where: {
       contractorId,
-      serviceId,
+      serviceId: service.id,
       status: { in: ["PENDING", "CONFIRMED"] as BookingStatus[] },
-      startsAt: { lte: new Date(dateTo) },
-      endsAt: { gte: new Date(dateFrom) },
+      startsAt: { lte: window.dateTo },
+      endsAt: { gte: window.dateFrom },
     },
     select: { startsAt: true, endsAt: true },
     orderBy: { startsAt: "asc" },
   });
 
-  // Build candidate slots (business hours 09:00–18:00 in 30-min increments).
-  const slotDuration = service.durationMins;
-  const slots: { startsAt: string; endsAt: string }[] = [];
-
-  const cursor = new Date(dateFrom);
-  cursor.setMinutes(0, 0, 0);
-  const end = new Date(dateTo);
-
-  while (cursor < end) {
-    const slotStart = new Date(cursor);
-    const slotEnd = new Date(cursor.getTime() + slotDuration * 60_000);
-
-    const hour = slotStart.getUTCHours();
-    const isBusinessHours = hour >= 9 && slotEnd.getUTCHours() <= 18;
-
-    if (isBusinessHours) {
-      const overlaps = existingBookings.some(
-        (b) => slotStart < b.endsAt && slotEnd > b.startsAt,
-      );
-      if (!overlaps) {
-        slots.push({
-          startsAt: slotStart.toISOString(),
-          endsAt: slotEnd.toISOString(),
-        });
-      }
-    }
-
-    cursor.setMinutes(cursor.getMinutes() + 30);
-  }
-
   return {
-    service: { id: serviceId, name: service.name, durationMins: slotDuration },
-    availableSlots: slots.slice(0, 20), // cap response size
+    timezone: timeZone,
+    businessHours: "09:00-18:00",
+    service: { id: service.id, name: service.name, durationMins: service.durationMins },
+    availableSlots: buildAvailableSlots({
+      timeZone,
+      durationMins: service.durationMins,
+      dateFrom: window.dateFrom,
+      dateTo: window.dateTo,
+      busy: existingBookings,
+    }),
   };
 }
 
@@ -98,31 +116,53 @@ export async function createBooking(params: {
   contractorId: string;
   customerId: string;
   serviceId: string;
+  serviceName: string;
   conversationId: string;
   startsAt: string;
   notes: string;
 }) {
-  const service = await prisma.service.findFirst({
-    where: {
-      id: params.serviceId,
-      contractorId: params.contractorId,
-      isActive: true,
-    },
-    select: { durationMins: true, name: true },
-  });
+  const service = await resolveService(params.contractorId, params.serviceId, params.serviceName);
 
   if (!service) {
-    return { error: "Service not found or inactive." };
+    return { error: "Service not found or inactive. Pass the exact service name from list_services." };
   }
 
   const startsAt = new Date(params.startsAt);
+  if (Number.isNaN(startsAt.getTime())) {
+    return { error: "startsAt must be an ISO 8601 instant from get_availability." };
+  }
   const endsAt = new Date(startsAt.getTime() + service.durationMins * 60_000);
+  const timeZone = await contractorTimezone(params.contractorId);
 
-  // Check for conflicts.
+  if (!isInsideBusinessHours(startsAt, service.durationMins, timeZone)) {
+    const window = searchWindow(startsAt, new Date(startsAt.getTime() + 60_000), timeZone);
+    const busy = await prisma.booking.findMany({
+      where: {
+        contractorId: params.contractorId,
+        serviceId: service.id,
+        status: { in: ["PENDING", "CONFIRMED"] as BookingStatus[] },
+        startsAt: { lte: window.dateTo },
+        endsAt: { gte: window.dateFrom },
+      },
+      select: { startsAt: true, endsAt: true },
+    });
+    const alternatives = buildAvailableSlots({
+      timeZone,
+      durationMins: service.durationMins,
+      dateFrom: window.dateFrom,
+      dateTo: window.dateTo,
+      busy,
+    }).slice(0, 3);
+    return {
+      error: `That start is outside business hours (09:00–18:00 ${timeZone}). Do not book it. If the customer asked for a local time such as 10:00 AM, choose the slot whose localStart matches that time and only book it after they accept it.`,
+      alternatives,
+    };
+  }
+
   const conflict = await prisma.booking.findFirst({
     where: {
       contractorId: params.contractorId,
-      serviceId: params.serviceId,
+      serviceId: service.id,
       status: { in: ["PENDING", "CONFIRMED"] as BookingStatus[] },
       startsAt: { lt: endsAt },
       endsAt: { gt: startsAt },
@@ -131,41 +171,109 @@ export async function createBooking(params: {
 
   if (conflict) {
     return {
-      error: "That time slot is no longer available. Please call get_availability for updated slots.",
+      error: "That time is already booked. Offer the customer up to 3 other localStart values and wait. Do not create a booking for a different time.",
     };
   }
 
-  const booking = await prisma.booking.create({
-    data: {
-      contractorId: params.contractorId,
-      customerId: params.customerId,
-      serviceId: params.serviceId,
-      conversationId: params.conversationId,
-      status: "CONFIRMED",
-      startsAt,
-      endsAt,
-      notes: params.notes || null,
-      idempotencyKey: `${params.conversationId}-${params.startsAt}`,
+  const idempotencyKey = `${params.conversationId}-${params.startsAt}`;
+  try {
+    const booking = await prisma.booking.create({
+      data: {
+        contractorId: params.contractorId,
+        customerId: params.customerId,
+        serviceId: service.id,
+        conversationId: params.conversationId,
+        status: "CONFIRMED",
+        startsAt,
+        endsAt,
+        notes: params.notes || null,
+        idempotencyKey,
+      },
+      select: {
+        id: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        notes: true,
+        service: { select: { name: true } },
+      },
+    });
+
+    return { booking: presentBooking(booking, timeZone) };
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error;
+    const existing = await prisma.booking.findUnique({
+      where: { idempotencyKey },
+      select: {
+        id: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        notes: true,
+        service: { select: { name: true } },
+      },
+    });
+    if (!existing) throw error;
+    return { booking: presentBooking(existing, timeZone) };
+  }
+}
+
+function presentBooking(
+  booking: {
+    id: string;
+    status: BookingStatus;
+    startsAt: Date;
+    endsAt: Date;
+    notes: string | null;
+    service: { name: string };
+  },
+  timeZone: string,
+) {
+  return {
+    id: booking.id,
+    status: booking.status,
+    serviceName: booking.service.name,
+    startsAt: booking.startsAt.toISOString(),
+    endsAt: booking.endsAt.toISOString(),
+    localStart: formatLocal(booking.startsAt, timeZone),
+    notes: booking.notes,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  list_customer_bookings                                               */
+/* ------------------------------------------------------------------ */
+
+export async function listCustomerBookings(customerId: string, contractorId: string) {
+  const timeZone = await contractorTimezone(contractorId);
+  const bookings = await prisma.booking.findMany({
+    where: {
+      customerId,
+      contractorId,
+      status: { in: ["PENDING", "CONFIRMED"] as BookingStatus[] },
+      startsAt: { gte: new Date(Date.now() - 60 * 60_000) },
     },
     select: {
       id: true,
       status: true,
       startsAt: true,
-      endsAt: true,
       notes: true,
       service: { select: { name: true } },
     },
+    orderBy: { startsAt: "asc" },
+    take: 10,
   });
 
   return {
-    booking: {
+    timezone: timeZone,
+    bookings: bookings.map((booking) => ({
       id: booking.id,
       status: booking.status,
       serviceName: booking.service.name,
       startsAt: booking.startsAt.toISOString(),
-      endsAt: booking.endsAt.toISOString(),
+      localStart: formatLocal(booking.startsAt, timeZone),
       notes: booking.notes,
-    },
+    })),
   };
 }
 

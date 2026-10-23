@@ -189,6 +189,11 @@ agentRouter.post("/chat", async (c) => {
 
   // If conversation is escalated to HUMAN_HANDOFF, save the user message and keep continuity!
   if (conversation.status === "HUMAN_HANDOFF") {
+    const isSpanish = /[áéíóúñ¿¡]|\b(hola|gracias|quiero|reserva|turno|servicio|hora|dia|buenos|buenas|por favor|ayuda)\b/i.test(message);
+    const reply = isSpanish
+      ? "Tu mensaje fue recibido por nuestro equipo de atención humana. Un especialista te responderá directamente aquí a la brevedad."
+      : "Your message has been received by our support team. A specialist will reply to you directly here shortly.";
+
     await prisma.$transaction([
       prisma.message.create({
         data: {
@@ -198,16 +203,20 @@ agentRouter.post("/chat", async (c) => {
           channel: conversation.channel,
         },
       }),
+      prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          role: "ASSISTANT",
+          content: reply,
+          channel: conversation.channel,
+          metadata: { author: "staff" },
+        },
+      }),
       prisma.conversation.update({
         where: { id: conversation.id },
         data: { lastMessageAt: new Date() },
       }),
     ]);
-
-    const isSpanish = /[áéíóúñ¿¡]|\b(hola|gracias|quiero|reserva|turno|servicio|hora|dia|buenos|buenas|por favor|ayuda)\b/i.test(message);
-    const reply = isSpanish
-      ? "Tu mensaje fue recibido por nuestro equipo de atención humana. Un especialista te responderá directamente aquí a la brevedad."
-      : "Your message has been received by our support team. A specialist will reply to you directly here shortly.";
 
     return c.json({
       conversationId: conversation.id,
