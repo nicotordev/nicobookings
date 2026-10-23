@@ -3,9 +3,12 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 
+const configuredApi = process.env.VITE_API_URL ?? "";
 const apiProxyTarget =
   process.env.API_PROXY_TARGET ??
-  `http://127.0.0.1:${process.env.API_PORT ?? process.env.PORT ?? "3001"}`;
+  (/^https?:\/\//.test(configuredApi) && !/localhost|127\.0\.0\.1/.test(configuredApi)
+    ? configuredApi
+    : `http://127.0.0.1:${process.env.API_PORT ?? "3001"}`);
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -15,7 +18,10 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: [".nicotordev.com", ".up.railway.app"],
     proxy: {
-      "/api": apiProxyTarget,
+      "/api": {
+        target: apiProxyTarget,
+        changeOrigin: true,
+      },
     },
   },
   preview: {
